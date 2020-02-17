@@ -9,11 +9,17 @@ public enum eCardState {
     discard
 }
 
-public class CardProspector : Card   //Proespector游戏继承自Card父类
+public class CardProspector : Card   //Prospector游戏继承自Card父类
 {
     [Header("Set Dynamically: CardProspector")]
     public eCardState state = eCardState.drawpile;
     public List<CardProspector> hiddenBy = new List<CardProspector>();
     public int layoutID;
     public SlotDef slotDef;
+
+    override public void OnMouseUpAsButton() {
+        Prospector.S.CardClicked(this);
+        base.OnMouseUpAsButton();
+    }
+
 }

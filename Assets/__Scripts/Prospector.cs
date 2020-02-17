@@ -66,13 +66,14 @@ public class Prospector : MonoBehaviour
 
     //此函数是摆好桌面上的最初排列
     void LayoutGame() {
-        //先创建一个新的GameObject，用来作为桌面table的锚定
+        //先创建一个新的GameObject，用来作为桌面tableau的锚定
         if(layoutAnchor == null) {
             GameObject tGO = new GameObject("_LayoutAnchor");
             layoutAnchor = tGO.transform;
             layoutAnchor.transform.position = layoutCenter;
         }
 
+        //建立起矿堆 tableau
         CardProspector cp;
         foreach(SlotDef tSD in layout.slotDefs) {
             cp = Draw();
@@ -88,5 +89,160 @@ public class Prospector : MonoBehaviour
             cp.SetSortingLayerName(tSD.layerName);
             tableau.Add(cp);
         }
+
+        //找到tableau中哪些卡被哪些卡挡住
+        foreach(CardProspector tCP in tableau) {
+            foreach(int hid in tCP.slotDef.hiddenBy) {
+                cp = FindCardByLayoutID(hid);
+                tCP.hiddenBy.Add(cp);
+            }
+        }
+
+        //抽取第一张target卡片
+        MoveToTarget(Draw());
+
+        //建立好初始的抽卡堆
+        UpdateDrawPile();  
+    }
+
+    //把xml文件中的id装化成CardProspector中的id
+    CardProspector FindCardByLayoutID(int layoutID) {
+        foreach(CardProspector tCP in tableau) {
+            if(tCP.layoutID == layoutID) {
+                return(tCP);
+            }
+        }
+        return(null);
+    }
+
+    //把矿中的卡翻面
+    void SetTableauFaces() {
+        foreach(CardProspector cd in tableau) {
+            bool faceUp = true;
+            foreach(CardProspector cover in cd.hiddenBy) {
+                if(cover.state == eCardState.tableau) {
+                    faceUp = false;
+                }
+            }
+            cd.faceUp = faceUp;
+        }
+    }
+
+    //把目前的target移动到废弃牌堆里
+    void MoveToDiscard(CardProspector cd) {
+        cd.state = eCardState.discard;
+        discardPile.Add(cd);
+        cd.transform.parent = layoutAnchor;
+        cd.transform.localPosition = new Vector3(
+            layout.multiplier.x * layout.discardPile.x,
+            layout.multiplier.y * layout.discardPile.y,
+            -layout.discardPile.layerID+0.5f
+        );
+        cd.faceUp = true;
+        //set the depth sorting
+        cd.SetSortingLayerName(layout.discardPile.layerName);
+        cd.SetSortOrder(-100 + discardPile.Count);
+    }
+
+    //从待抽取的卡堆中抽取一张新的target
+    void MoveToTarget(CardProspector cd) {
+        if(target != null) MoveToDiscard(target);
+        target = cd;
+        cd.state = eCardState.target;
+        cd.transform.parent = layoutAnchor;   //先移动到世界坐标系的位置
+        //把抽取的卡片移动到target的位置，注意是与parent: layerAnchor的相对位置
+        cd.transform.localPosition = new Vector3(
+            layout.multiplier.x * layout.discardPile.x,
+            layout.multiplier.y * layout.discardPile.y,
+            -layout.discardPile.layerID
+        );
+        cd.faceUp = true;
+        cd.SetSortingLayerName(layout.discardPile.layerName);
+        cd.SetSortOrder(0);
+    }
+
+    //重新安置待抽取的卡堆
+    void UpdateDrawPile() {
+        CardProspector cd;
+        for(int i=0; i<drawPile.Count; i++) {
+            cd = drawPile[i];
+            cd.transform.parent = layoutAnchor;
+
+            Vector2 dpStagger = layout.drawPile.stagger;
+            cd.transform.localPosition = new Vector3(
+                layout.multiplier.x * (layout.drawPile.x + i * dpStagger.x),
+                layout.multiplier.y * (layout.drawPile.y + i * dpStagger.y),
+                -layout.drawPile.layerID + 0.1f*i
+            );
+            cd.faceUp = false;
+            cd.state = eCardState.drawpile;
+            cd.SetSortingLayerName(layout.drawPile.layerName);
+            cd.SetSortOrder(-10*i);
+        }
+    }
+
+    public void CardClicked(CardProspector cd) {
+        //根据卡的状态
+        switch(cd.state) {
+            case eCardState.target:
+                break;
+            case eCardState.drawpile:
+                MoveToDiscard(target);
+                MoveToTarget(Draw());
+                UpdateDrawPile();
+                ScoreManager.EVENT(eScoreEvent.draw);
+                break;
+            case eCardState.tableau:
+                bool validMatch = true;
+                if(!cd.faceUp) {
+                    validMatch = false;
+                }
+                if(!AdjacentRank(cd, target)) {
+                    validMatch = false;
+                }
+                if(!validMatch) return;
+
+                //if valid
+                tableau.Remove(cd);
+                MoveToTarget(cd);
+                SetTableauFaces();
+                ScoreManager.EVENT(eScoreEvent.mine);
+                break;
+        }
+        CheckForGameOver();
+    }
+
+    void CheckForGameOver() {
+        if(tableau.Count == 0) {
+            GameOver(true);
+            return;
+        }
+        if(drawPile.Count > 0) return;
+        foreach(CardProspector cd in tableau) {
+            if(AdjacentRank(cd, target)) {
+                return;
+            }
+        }
+        GameOver(false);
+    }
+
+    void GameOver(bool won) {
+        if(won) {
+            print("Game Over. You won! :)");
+            ScoreManager.EVENT(eScoreEvent.gameWin);
+        } else {
+            print("Game Over. You Lost. :(");
+            ScoreManager.EVENT(eScoreEvent.gameLoss);
+        }
+
+        SceneManager.LoadScene("__Prospector_Scene_0");
+    }
+    
+    public bool AdjacentRank(CardProspector c0, CardProspector c1) {
+        if(!c0.faceUp || !c1.faceUp) return(false);
+        if(Mathf.Abs(c0.rank - c1.rank) == 1) return(true);
+        if(c0.rank == 1 && c1.rank == 13) return(true);
+        if(c0.rank == 13 && c1.rank == 1) return(true);
+        return(false);
     }
 }
